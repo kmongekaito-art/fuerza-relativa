@@ -13,8 +13,6 @@ st.markdown("""
     <style>
     .stMetric { background-color: #f0f2f6; padding: 10px; border-radius: 5px; }
     .stDataFrame { font-size: 14px; }
-    .long-signal { color: green; font-weight: bold; }
-    .no-signal { color: red; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -41,14 +39,12 @@ def calculate_bars_since(condition_series):
 
 @st.cache_data(show_spinner="Descargando y calculando datos...")
 def load_and_calculate_data(ticker, period="2y"):
-    # Descarga de datos usando yf.Ticker para evitar problemas de MultiIndex
     etf_data = yf.Ticker(ticker).history(period=period)
     spy_data = yf.Ticker('SPY').history(period=period)
     
     if etf_data.empty or spy_data.empty:
         raise ValueError(f"No se pudieron descargar datos para {ticker} o SPY.")
 
-    # Crear DataFrame principal y copiar TODAS las columnas OHLCV
     df = pd.DataFrame(index=etf_data.index)
     df['Open'] = etf_data['Open']
     df['High'] = etf_data['High']
@@ -56,8 +52,6 @@ def load_and_calculate_data(ticker, period="2y"):
     df['Close'] = etf_data['Close']
     df['Volume'] = etf_data['Volume']
     df['SPY_Close'] = spy_data['Close']
-    
-    # Alinear fechas y eliminar NaNs iniciales
     df.dropna(inplace=True)
 
     # 1. Relative Strength (RS) y su Media Móvil (MARS)
@@ -65,7 +59,6 @@ def load_and_calculate_data(ticker, period="2y"):
     df['RS'] = rs_raw.ewm(span=2, adjust=False).mean() * 100
     df['MARS'] = df['RS'].rolling(60).mean()
     
-    # Cruce y BarsSince
     cross = (df['RS'] > df['MARS']) & (df['RS'].shift(1) <= df['MARS'].shift(1))
     df['BSCRRS'] = calculate_bars_since(cross)
 
@@ -78,23 +71,22 @@ def load_and_calculate_data(ticker, period="2y"):
     # 3. RSI 5 periodos
     df['RSI_5'] = calculate_rsi(df['Close'], 5)
 
-    # 4. EMA 50 (Para el chart principal)
+    # 4. EMA 50
     df['EMA_50'] = df['Close'].ewm(span=50, adjust=False).mean()
 
-    # 5. ROC SPY 2 días (Para el filtro de mercado)
+    # 5. ROC SPY 2 días
     df['ROC_SPY_2'] = df['SPY_Close'].pct_change(2) * 100
 
-    # --- CONDICIONES FINALES DE INSCRIPCION (LONG) ---
-    cond1 = df['RS'] > 1.02 * df['MARS']
-    cond2 = (df['BSCRRS'] < 20) & (df['BSCRRS'] > 0) 
-    cond3 = (df['COROC'] > 0.3) & (df['COR1'] > 0.3)
-    cond4 = (df['ROC_SPY_2'] > -6) | (df['COROC'] < -0.3)
-    cond5 = (df['RSI_5'].rolling(5).min() < 30) & (df['RSI_5'] > df['RSI_5'].shift(1))
-    
-    # Filtro de Liquidez
-    lqd = (df['Close'] > 2) & (df['Volume'].rolling(3).mean() > 50000)
+    # --- CONDICIONES FINALES (LONG) ---
+    cond1 = df['Close'] > 2
+    cond2 = df['RS'] > 1.02 * df['MARS']
+    cond3 = (df['BSCRRS'] < 20) & (df['BSCRRS'] > 0) 
+    cond4 = (df['COROC'] > 0.3) & (df['COR1'] > 0.3)
+    cond5 = (df['ROC_SPY_2'] > -6) | (df['COROC'] < -0.3)
+    cond6 = (df['RSI_5'].rolling(5).min() < 30) & (df['RSI_5'] > df['RSI_5'].shift(1))
+    cond7 = df['Volume'].rolling(3).mean() > 50000
 
-    df['LONG_SIGNAL'] = cond1 & cond2 & cond3 & cond4 & cond5 & lqd
+    df['LONG_SIGNAL'] = cond1 & cond2 & cond3 & cond4 & cond5 & cond6 & cond7
 
     return df
 
@@ -107,7 +99,7 @@ with st.sidebar:
     st.header("⚙️ Configuración")
     
     etfs = ['XLB', 'XLC', 'XLE', 'XLF', 'XLI', 'XLK', 'XLP', 'XLRE', 'XLU', 'XLV', 'XLY']
-    selected_etf = st.selectbox("Selecciona el ETF Sectorial:", etfs, index=5) # XLK por defecto
+    selected_etf = st.selectbox("Selecciona el ETF Sectorial:", etfs, index=5)
     
     st.markdown("---")
     st.subheader("Gráfico de Indicadores")
@@ -116,9 +108,6 @@ with st.sidebar:
         [1, 2, 3], 
         help="1: RS | 2: RS + RSI | 3: RS + Correlación + RSI"
     )
-    
-    st.markdown("---")
-    st.info("💡 **Nota:** La EMA de 50 periodos se muestra siempre en el gráfico principal de precios.")
 
 # --- CARGA DE DATOS ---
 try:
@@ -130,36 +119,27 @@ except Exception as e:
 # --- GRÁFICO CENTRAL (PLOTLY) ---
 st.subheader(f"Análisis Técnico: {selected_etf} vs SPY")
 
-# Determinar qué indicadores mostrar
 indicators_to_plot = ['RS']
-if num_indicators >= 2:
-    indicators_to_plot.append('RSI')
-if num_indicators >= 3:
-    indicators_to_plot.append('COR')
+if num_indicators >= 2: indicators_to_plot.append('RSI')
+if num_indicators >= 3: indicators_to_plot.append('COR')
 
 num_rows = 1 + len(indicators_to_plot)
 row_heights = [0.5] + [0.5 / len(indicators_to_plot)] * len(indicators_to_plot)
 
 fig = make_subplots(
-    rows=num_rows, cols=1, 
-    shared_xaxes=True, 
-    vertical_spacing=0.03,
-    row_heights=row_heights,
-    subplot_titles=[f"{selected_etf} Precio & EMA 50"] + indicators_to_plot
+    rows=num_rows, cols=1, shared_xaxes=True, vertical_spacing=0.03,
+    row_heights=row_heights, subplot_titles=[f"{selected_etf} Precio & EMA 50"] + indicators_to_plot
 )
 
-# Fila 1: Velas Japonesas + EMA 50
 fig.add_trace(go.Candlestick(
     x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
     name='Price', increasing_line_color='#26a69a', decreasing_line_color='#ef5350'
 ), row=1, col=1)
 
 fig.add_trace(go.Scatter(
-    x=df.index, y=df['EMA_50'], mode='lines', name='EMA 50', 
-    line=dict(color='orange', width=1.5)
+    x=df.index, y=df['EMA_50'], mode='lines', name='EMA 50', line=dict(color='orange', width=1.5)
 ), row=1, col=1)
 
-# Sub-gráficos de indicadores
 current_row = 2
 for ind in indicators_to_plot:
     if ind == 'RS':
@@ -168,79 +148,102 @@ for ind in indicators_to_plot:
     elif ind == 'RSI':
         fig.add_trace(go.Scatter(x=df.index, y=df['RSI_5'], name='RSI (5)', line=dict(color='purple')), row=current_row, col=1)
         fig.add_hline(y=30, line_dash="dash", line_color="gray", row=current_row, col=1)
-        fig.add_hline(y=70, line_dash="dash", line_color="gray", row=current_row, col=1)
     elif ind == 'COR':
-        fig.add_trace(go.Scatter(x=df.index, y=df['COR1'], name='COR1 (Price)', line=dict(color='teal')), row=current_row, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=df['COROC'], name='COROC (ROC)', line=dict(color='orange')), row=current_row, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['COR1'], name='COR1', line=dict(color='teal')), row=current_row, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['COROC'], name='COROC', line=dict(color='orange')), row=current_row, col=1)
         fig.add_hline(y=0.3, line_dash="dash", line_color="green", row=current_row, col=1)
     current_row += 1
 
-fig.update_layout(
-    height=800, 
-    xaxis_rangeslider_visible=False, 
-    template="plotly_white",
-    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-)
+fig.update_layout(height=800, xaxis_rangeslider_visible=False, template="plotly_white",
+                  legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
 fig.update_xaxes(type='category', tickangle=-45, nticks=20)
-
 st.plotly_chart(fig, use_container_width=True)
 
-# --- TABLA INFERIOR DE VALORES Y SEÑAL ---
-st.subheader("📋 Tablero de Indicadores y Señal de Entrada")
+# --- TABLA INFERIOR CON FEEDBACK VISUAL (VERDE/ROJO) ---
+st.subheader("📋 Tablero de Condiciones y Señal de Entrada")
 
-# Obtener la última fila con datos válidos
 last_row = df.iloc[-1]
+prev_row = df.iloc[-2]
 
-# Crear dataframe para la tabla
-metrics_data = {
+# 1. Calcular booleanos para cada condición individual
+c_price = last_row['Close'] > 2
+c_rs = last_row['RS'] > 1.02 * last_row['MARS']
+
+bscrrs_val = last_row['BSCRRS']
+c_bscrrs = (bscrrs_val > 0) and (bscrrs_val < 20) if not np.isnan(bscrrs_val) else False
+
+cor1_val = last_row['COR1']
+c_cor1 = cor1_val > 0.30 if not np.isnan(cor1_val) else False
+
+coroc_val = last_row['COROC']
+c_coroc = coroc_val > 0.30 if not np.isnan(coroc_val) else False
+
+rsi_min_5 = df['RSI_5'].rolling(5).min().iloc[-1]
+c_rsi = (rsi_min_5 < 30) and (last_row['RSI_5'] > prev_row['RSI_5'])
+
+c_spy = (last_row['ROC_SPY_2'] > -6) or (coroc_val < -0.3 if not np.isnan(coroc_val) else False)
+
+vol_ma3 = df['Volume'].rolling(3).mean().iloc[-1]
+c_vol = vol_ma3 > 50000
+
+c_long = last_row['LONG_SIGNAL']
+
+# 2. Construir DataFrame de la tabla
+data = {
     "Indicador": [
-        "Precio de Cierre", "RS (Fuerza Relativa)", "MARS (Media RS 60)", 
-        "BSCRRS (Barras desde cruce)", "COR1 (Correlación 100d)", 
-        "COROC (Correlación ROC)", "RSI (5 periodos)", "ROC SPY (2 días)",
-        "Filtro Liquidez", "SEÑAL LONG (Katsanos)"
+        "1. Precio (Liquidez)", "2. RS (Fuerza Relativa)", "3. BSCRRS (Barras desde cruce)",
+        "4. COR1 (Correlación 100d)", "5. COROC (Correlación ROC)", "6. RSI (5 periodos)",
+        "7. ROC SPY (Filtro Mercado)", "8. Volumen (Liquidez)", "🎯 SEÑAL LONG FINAL"
     ],
     "Valor Actual": [
-        f"${last_row['Close']:.2f}", 
-        f"{last_row['RS']:.2f}", 
-        f"{last_row['MARS']:.2f}",
-        f"{int(last_row['BSCRRS']) if not np.isnan(last_row['BSCRRS']) else 'N/A'}",
-        f"{last_row['COR1']:.3f}" if not np.isnan(last_row['COR1']) else 'N/A',
-        f"{last_row['COROC']:.3f}" if not np.isnan(last_row['COROC']) else 'N/A',
+        f"${last_row['Close']:.2f}",
+        f"{last_row['RS']:.2f} (MARS: {last_row['MARS']:.2f})",
+        f"{int(bscrrs_val)}" if not np.isnan(bscrrs_val) else 'N/A',
+        f"{cor1_val:.3f}" if not np.isnan(cor1_val) else 'N/A',
+        f"{coroc_val:.3f}" if not np.isnan(coroc_val) else 'N/A',
         f"{last_row['RSI_5']:.2f}",
         f"{last_row['ROC_SPY_2']:.2f}%",
-        "Cumplido ✅" if (last_row['Close'] > 2 and df['Volume'].rolling(3).mean().iloc[-1] > 50000) else "No cumplido ❌",
-        "🟢 COMPRA (LONG)" if last_row['LONG_SIGNAL'] else "🔴 SIN SEÑAL"
+        f"{vol_ma3:,.0f}",
+        "🟢 COMPRA (LONG)" if c_long else "🔴 SIN SEÑAL"
     ],
-    "Condición Estratégica": [
-        "-", 
-        "Debe ser > 1.02 * MARS", 
-        "Media de 60 días del RS",
-        "Debe ser < 20 y > 0",
-        "Debe ser > 0.30",
-        "Debe ser > 0.30",
-        "Debe haber sido < 30 en los últimos 5d y subir hoy",
-        "SPY > -6% (o COROC < -0.3)",
-        "Precio > $2 y Vol > 50k",
-        "Confluencia de todas las condiciones"
+    "Condición Requerida": [
+        "> $2.00", "> 1.02 * MARS", "> 0 y < 20 días",
+        "> 0.30", "> 0.30", "Min(5d) < 30 y Sube hoy",
+        "SPY > -6% o COROC < -0.3", "Media(3d) > 50,000", "Todas las anteriores"
+    ],
+    "Cumple": [
+        "✅" if c else "❌" for c in [c_price, c_rs, c_bscrrs, c_cor1, c_coroc, c_rsi, c_spy, c_vol, c_long]
     ]
 }
 
-table_df = pd.DataFrame(metrics_data)
+table_df = pd.DataFrame(data)
 
-# Función para resaltar la fila de la señal
-def highlight_signal(val):
-    if "COMPRA" in val:
-        return 'background-color: #d4edda; color: #155724; font-weight: bold'
-    elif "SIN SEÑAL" in val:
-        return 'background-color: #f8d7da; color: #721c24; font-weight: bold'
-    return ''
+# 3. Función para aplicar colores de fondo a la columna "Valor Actual"
+def apply_colors(row):
+    styles = [''] * len(row)
+    val_idx = row.index.get_loc('Valor Actual')
+    
+    if row['Cumple'] == "✅":
+        # Verde suave para cumplido
+        styles[val_idx] = 'background-color: #d4edda; color: #155724; font-weight: bold'
+    else:
+        # Rojo suave para no cumplido
+        styles[val_idx] = 'background-color: #f8d7da; color: #721c24; font-weight: bold'
+        
+    return styles
+
+# Aplicar estilo y renderizar
+styled_df = table_df.style.apply(apply_colors, axis=1)
 
 st.dataframe(
-    table_df.style.applymap(highlight_signal, subset=['Valor Actual']),
+    styled_df,
     use_container_width=True,
     hide_index=True,
-    height=450
+    height=420,
+    column_config={
+        "Cumple": st.column_config.TextColumn("Estado", width="small")
+    }
 )
 
 st.markdown("---")
-st.caption("Desarrollado con Streamlit y Python. Lógica basada en el artículo de Markos Katsanos (X-Trader / Hispatrading). Los datos se obtienen en tiempo real vía Yahoo Finance.")
+st.caption("Desarrollado con Streamlit y Python. Lógica basada en el artículo de Markos Katsanos. Celdas en 🟢 Verde = Condición Cumplida | Celdas en 🔴 Rojo = Condición No Cumplida.")
