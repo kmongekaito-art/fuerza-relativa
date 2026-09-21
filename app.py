@@ -159,7 +159,7 @@ fig.update_layout(height=800, xaxis_rangeslider_visible=False, template="plotly_
 fig.update_xaxes(type='category', tickangle=-45, nticks=20)
 st.plotly_chart(fig, use_container_width=True)
 
-# --- TABLA INFERIOR CON FEEDBACK VISUAL (VERDE/ROJO) ---
+# --- TABLA INFERIOR CON FEEDBACK VISUAL (VERDE/ROJO SÓLIDOS) ---
 st.subheader("📋 Tablero de Condiciones y Señal de Entrada")
 
 last_row = df.iloc[-1]
@@ -224,11 +224,11 @@ def apply_colors(row):
     val_idx = row.index.get_loc('Valor Actual')
     
     if row['Cumple'] == "✅":
-        # Verde suave para cumplido
-        styles[val_idx] = 'background-color: #d4edda; color: #155724; font-weight: bold'
+        # Verde oscuro profesional (Estilo Terminal de Trading)
+        styles[val_idx] = 'background-color: #198754; color: white; font-weight: bold'
     else:
-        # Rojo suave para no cumplido
-        styles[val_idx] = 'background-color: #f8d7da; color: #721c24; font-weight: bold'
+        # Rojo sólido para máximo contraste
+        styles[val_idx] = 'background-color: #dc3545; color: white; font-weight: bold'
         
     return styles
 
@@ -246,4 +246,4 @@ st.dataframe(
 )
 
 st.markdown("---")
-st.caption("Desarrollado con Streamlit y Python. Lógica basada en el artículo de Markos Katsanos. Celdas en 🟢 Verde = Condición Cumplida | Celdas en 🔴 Rojo = Condición No Cumplida.")
+st.caption("Desarrollado con Streamlit y Python. Lógica basada en el artículo de Markos Katsanos. Celdas en 🟢 Verde Oscuro = Condición Cumplida | Celdas en 🔴 Rojo = Condición No Cumplida."))
