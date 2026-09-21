@@ -246,4 +246,4 @@ st.dataframe(
 )
 
 st.markdown("---")
-st.caption("Desarrollado con Streamlit y Python. Lógica basada en el artículo de Markos Katsanos. Celdas en 🟢 Verde Oscuro = Condición Cumplida | Celdas en 🔴 Rojo = Condición No Cumplida."))
+st.caption("Desarrollado con Streamlit y Python. Lógica basada en el artículo de Markos Katsanos. Celdas en 🟢 Verde Oscuro = Condición Cumplida | Celdas en 🔴 Rojo = Condición No Cumplida.")
