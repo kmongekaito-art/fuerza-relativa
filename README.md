@@ -1,0 +1,2 @@
+# fuerza-relativa
+FUERZA RELATIVA SECTORIAL( MARK KATSANOS)
